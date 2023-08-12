@@ -1,10 +1,10 @@
+#ifdef USE_C10D_NCCL
+
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
-#include <mutex>
 #include <sstream>
-
-#ifdef USE_C10D_NCCL
 
 #include <exception>
 #include <map>
@@ -527,24 +527,20 @@ const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
+std::string getWorkInfo(const ProcessGroupNCCL::WorkNCCL& workNCCL) {
+  return fmt::format(
+      "WorkNCCL(SeqNum={}, OpType={}, NumelIn={}, NumelOut={}, Timeout(ms)={})",
+      workNCCL.seq_,
+      opTypeToString(workNCCL.opType_),
+      workNCCL.numelIn_,
+      workNCCL.numelOut_,
+      workNCCL.opTimeout_.count());
+}
+
 std::ostream& operator<<(
     std::ostream& output,
     const ProcessGroupNCCL::WorkNCCL& workNCCL) {
-  std::string workInfo;
-  workInfo = c10::str(
-      "WorkNCCL(",
-      "SeqNum=",
-      workNCCL.seq_,
-      ", OpType=",
-      opTypeToString(workNCCL.opType_),
-      ", NumelIn=",
-      workNCCL.numelIn_,
-      ", NumelOut=",
-      workNCCL.numelOut_,
-      ", Timeout(ms)=",
-      workNCCL.opTimeout_.count(),
-      ")");
-  return output << workInfo;
+  return output << getWorkInfo(workNCCL);
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(
@@ -691,15 +687,12 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
   if (exception())
     return true;
 
-  std::string exceptionMsg = c10::str(
-      "[Rank ",
+  std::string exceptionMsg = fmt::format(
+      "[Rank {}] Watchdog caught collective operation timeout: {} ran for {}"
+      " milliseconds before timing out.",
       rank_,
-      "] ",
-      "Watchdog caught collective operation timeout: ",
-      *this,
-      " ran for ",
-      timeElapsed.count(),
-      " milliseconds before timing out.");
+      getWorkInfo(*this),
+      timeElapsed.count());
 
   LOG(ERROR) << exceptionMsg;
   std::exception_ptr exception_ptr =
@@ -761,12 +754,10 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       // here, it was observed that CUDA GPU will have 100% utilization and
       // can not run new events successfully.
       if (timedOut) {
-        std::string exceptionMsg = c10::str(
-            "[Rank ",
+        std::string exceptionMsg = fmt::format(
+            "[Rank {}] Work {} timed out in blocking wait (NCCL_BLOCKING_WAIT=1).",
             rank_,
-            "] Work ",
-            (*this),
-            " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
+            getWorkInfo(*this));
         LOG(ERROR) << exceptionMsg;
         break;
       }
@@ -1156,7 +1147,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Abort communicators after all threads have exited to avoid having the
   // threads dying due to aborted communicator and raising a SIGABRT
-  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  std::string abortReason =
+      fmt::format("Process Group destroyed on rank {}", rank_);
   abort(abortReason);
 }
 
@@ -1169,17 +1161,17 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
-      LOG(INFO)
-          << "[Rank " << rank_
-          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
-          << " (Watchdog caught exception: " << e.what();
-
+      LOG(INFO) << fmt::format(
+          "[Rank {}] "
+          "main process destroyed cuda before watchdog loop exited, terminating watchdog. "
+          "(Watchdog caught exception: {})",
+          rank_,
+          e.what());
     } else {
       // Append error message reported from workCleanupLoop
-      const auto exitMsg = c10::str(
-          "[Rank ",
+      const auto exitMsg = fmt::format(
+          "[Rank {}] NCCL watchdog thread terminated with exception: {}",
           rank_,
-          "] NCCL watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
@@ -1189,10 +1181,9 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       std::rethrow_exception(watchDogException_);
     }
   } catch (...) {
-    const auto exitMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog thread terminated with exception: unknown");
+    const auto exitMsg = fmt::format(
+        "[Rank {}] NCCL watchdog thread terminated with exception: unknown",
+        rank_);
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
@@ -1392,11 +1383,9 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     // commFailureReason is set.
     auto commFailureReason = ncclComm->getNcclCommFailureReason();
     if (commFailureReason != c10::nullopt) {
-      return std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          c10::str(
-              "NCCL communicator encountered error set by ProcessGroupNCCL: ",
-              *commFailureReason)));
+      return std::make_exception_ptr(std::runtime_error(fmt::format(
+          "NCCL communicator encountered error set by ProcessGroupNCCL: {}",
+          *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
@@ -1449,30 +1438,25 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
           "Invalid size for ncclUniqueId");
       std::memcpy(ncclID, vec.data(), vec.size());
     } catch (const std::exception& e) {
-      std::string exceptionMsg = c10::str(
-          "[",
+      std::string exceptionMsg = fmt::format(
+          "[{}] is setting up NCCL communicator and retrieving ncclUniqueId "
+          "from [0] via c10d key-value store by key '{}', but store->get('{}') got error: ",
           rank_,
-          "] is setting up NCCL communicator and "
-          "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
           storeKey,
-          "', but store->get('",
-          storeKey,
-          "') got error: ");
-      C10_THROW_ERROR(
-          DistBackendError,
+          storeKey);
+      TORCH_CHECK(
+          false,
           exceptionMsg + e.what() +
               ". This may indicate a possible application crash on rank 0 or a network set up issue.");
     } catch (...) {
-      C10_THROW_ERROR(
-          DistBackendError,
-          c10::str(
-              "Unknown exception while [",
+      TORCH_CHECK(
+          false,
+          fmt::format(
+              "Unknown exception while [{}] is setting up NCCL communicator and "
+              "retrieving ncclUniqueId from [0] via c10d key-value store by key '{}"
+              "'. This may indicate a possible application crash on rank 0 or a network set up issue.",
               rank_,
-              "] is setting up NCCL communicator and "
-              "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
-              storeKey,
-              "'",
-              ". This may indicate a possible application crash on rank 0 or a network set up issue."));
+              storeKey));
     }
   }
 }
@@ -3135,14 +3119,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    LOG(INFO) << c10::str(
-        "Rank ",
+    LOG(INFO) << fmt::format(
+        "Rank {} using GPU {}"
+        " to perform barrier as devices used by this process are currently unknown. "
+        "This can potentially cause a hang if this rank to GPU mapping is incorrect."
+        "Specify device_ids in barrier() to force use of a particular device.",
         this->getRank(),
-        " using GPU ",
-        deviceIdx,
-        " to perform barrier as devices used by this process are currently unknown. ",
-        "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
-        "Specify device_ids in barrier() to force use of a particular device.");
+        deviceIdx);
     devices.emplace_back(getDeviceForRank(rank_));
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
