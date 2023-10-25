@@ -709,15 +709,15 @@ def _post_backward_hook(
     handle: FlatParamHandle,
     *unused: Any,
 ):
-    gpu_id = int(os.environ["LOCAL_RANK"])
-    log.warning("STATE IS? %s", state)
-    log.warning("handle IS? %s", handle)
-    log.warning("UNUSED IS? %s %s", unused, "what")
-    log.warning("POST BACKWARD ARGS? %s", len(unused))
+    # gpu_id = int(os.environ["LOCAL_RANK"])
+    # log.warning("STATE IS? %s", state)
+    # log.warning("handle IS? %s", handle)
+    # log.warning("UNUSED IS? %s %s", unused, "what")
+    # log.warning("POST BACKWARD ARGS? %s", len(unused))
     # import os
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
-    log.warning("RUNNING POST BWD HOOK")
+    # log.warning("RUNNING POST BWD HOOK")
     # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     # if state.training_state == TrainingState.IDLE:
     # return
@@ -1454,12 +1454,12 @@ def _register_post_backward_hook(
         "The `grad_fn` is needed to access the `AccumulateGrad` and "
         "register the post-backward hook",
     )
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-        assert acc_grad is not None
-        hook = functools.partial(_post_backward_hook, state, handle)
-        hook_handle = acc_grad.register_hook(hook)
-        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+    # if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+    assert acc_grad is not None
+    hook = functools.partial(_post_backward_hook, state, handle)
+    hook_handle = acc_grad.register_hook(hook)
+    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(

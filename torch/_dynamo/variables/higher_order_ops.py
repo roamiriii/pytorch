@@ -1341,8 +1341,8 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
         assert "fn" in kwargs
         fn = kwargs["fn"]
-        assert len(args) == 1
-        grad = args[0]
-        assert isinstance(grad, TensorVariable)
+        # assert len(args) == 1
+        # grad = args[0]
+        # assert isinstance(grad, TensorVariable)
 
         return fn.call_function(tx, args, {})

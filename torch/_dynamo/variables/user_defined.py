@@ -779,15 +779,15 @@ class AccumulateGradVariable(UserDefinedObjectVariable):
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                fn = functools.partial(trace_wrapped, fn=fn)
+                # fn = functools.partial(trace_wrapped, fn=fn)
 
-                def _register_hook_trampoline(tensor):
+                def _register_hook_trampoline_acc_grad(tensor):
                     tensor.register_hook(fn)
                     return tensor
 
                 new_proxy = tx.output.create_proxy(
                     "call_function",
-                    _register_hook_trampoline,
+                    _register_hook_trampoline_acc_grad,
                     (self.as_proxy(),),
                     {},
                 )
