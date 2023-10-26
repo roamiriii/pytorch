@@ -161,6 +161,8 @@ def transform_subclass(t, callback, *args):
     It will do so by grabbing each inner tensor attribute from the wrapper,
     passing them into ``callback`` to get a transformed tensor,
     and putting each transformed tensor into the fresh tensor subclass instance.
+    An optional list of additional arguments can be passed to ``transform_subclass``,
+    which will be passed to ``callback`` after the tensor attribute.
 
     Note: this function will not handle ensuring that the fresh subclass
     gets the same (autograd, and aliasing) metadata as the original tensor.
@@ -169,12 +171,17 @@ def transform_subclass(t, callback, *args):
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
 
-    if any(len(arg) != len(attrs) for arg in args):
-        raise ValueError("All additional arguments must be lists of the same length as attrs")
+    # TODO I don't know if we should be doing this differently
+    # In the case of views on traceable subclasses, we recursively construct meta_tensors from bases
+    # During this process we pass in a None for the dynamic dimensions and constraint dims
+
+    if any(arg is not None and len(arg) != len(attrs) for arg in args):
+        raise ValueError("All additional arguments must be lists of the same length as attrs or None")
 
     for i, attr in enumerate(attrs):
         callback_args = [getattr(t, attr)]
-        callback_args.extend(arg[i] for arg in args)
+        # See note above
+        callback_args.extend([arg[i] if arg is not None else None for arg in args])
         transformed_tensors_dict[attr] = callback(attr, *callback_args)
 
     return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
