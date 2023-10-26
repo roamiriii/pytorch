@@ -147,7 +147,12 @@ def is_traceable_wrapper_subclass(t):
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback):
+def get_flattened_tensors(t):
+    assert is_traceable_wrapper_subclass(t), f"Expected a traceable wrapper subclass, but got {type(t)}"
+    attrs, _ = type(t).__tensor_flatten__(t)
+    return [getattr(t, attr) for attr in attrs]
+
+def transform_subclass(t, callback, *args):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -163,8 +168,15 @@ def transform_subclass(t, callback):
     """
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
-    for attr in attrs:
-        transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
+
+    if any(len(arg) != len(attrs) for arg in args):
+        raise ValueError("All additional arguments must be lists of the same length as attrs")
+
+    for i, attr in enumerate(attrs):
+        callback_args = [getattr(t, attr)]
+        callback_args.extend(arg[i] for arg in args)
+        transformed_tensors_dict[attr] = callback(attr, *callback_args)
+
     return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
 def _correct_storage_aliasing(func, schema_info, args, outs):

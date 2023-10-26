@@ -18,6 +18,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
+    get_flattened_tensors
 )
 from torch.utils.weak import WeakIdRef
 
@@ -229,7 +230,7 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(t, src, dynamic_dims, constraint_dims):
             if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
@@ -409,18 +410,18 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                            (
+                                sizes,
+                                strides,
+                                storage_offset,
+                            ) = sym_sizes_strides_storage_offset(t, source, dynamic_dims, constraint_dims)
 
-                    def empty_create(inner_t, inner_src):
+                    def empty_create(inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim):
                         (
                             inner_sizes,
                             inner_strides,
                             inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
+                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim)
                         return torch.empty_strided(
                             inner_sizes,
                             inner_strides,
@@ -480,12 +481,15 @@ class MetaConverter:
                         else:
                             r = transform_subclass(
                                 t,
-                                lambda attr, inner_t: callback(
+                                lambda attr, inner_t, tensor_dyn_dim, tensor_constraint_dim: callback(
                                     lambda: empty_create(
                                         inner_t,
                                         AttrSource(source, attr),
+                                        tensor_dyn_dim,
+                                        tensor_constraint_dim
                                     )
                                 ),
+                                dynamic_dims, constraint_dims
                             )
                     else:
                         r = callback(
