@@ -18,7 +18,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
-    get_flattened_tensors
 )
 from torch.utils.weak import WeakIdRef
 
@@ -283,7 +282,7 @@ class MetaConverter:
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
+                        t, source, dynamic_dims, constraint_dims
                     )
                     r = callback(
                         lambda: torch.empty_strided(
@@ -370,7 +369,9 @@ class MetaConverter:
                             sizes,
                             strides,
                             storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                        ) = sym_sizes_strides_storage_offset(
+                            t, source, dynamic_dims, constraint_dims
+                        )
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
@@ -410,18 +411,27 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
-                            (
-                                sizes,
-                                strides,
-                                storage_offset,
-                            ) = sym_sizes_strides_storage_offset(t, source, dynamic_dims, constraint_dims)
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(
+                            t, source, dynamic_dims, constraint_dims
+                        )
 
-                    def empty_create(inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim):
+                    def empty_create(
+                        inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim
+                    ):
                         (
                             inner_sizes,
                             inner_strides,
                             inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim)
+                        ) = sym_sizes_strides_storage_offset(
+                            inner_t,
+                            inner_src,
+                            tensor_dynamic_dim,
+                            tensor_constraint_dim,
+                        )
                         return torch.empty_strided(
                             inner_sizes,
                             inner_strides,
@@ -454,7 +464,10 @@ class MetaConverter:
                                 inner_t = getattr(t, attr)
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
-                                        inner_t, AttrSource(source, attr)
+                                        inner_t,
+                                        AttrSource(source, attr),
+                                        dynamic_dims,
+                                        constraint_dims,
                                     )
                                 )
                             # We expect JaggedTensor to have a 'ragged_size' in
@@ -486,10 +499,11 @@ class MetaConverter:
                                         inner_t,
                                         AttrSource(source, attr),
                                         tensor_dyn_dim,
-                                        tensor_constraint_dim
+                                        tensor_constraint_dim,
                                     )
                                 ),
-                                dynamic_dims, constraint_dims
+                                dynamic_dims,
+                                constraint_dims,
                             )
                     else:
                         r = callback(

@@ -31,7 +31,10 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass, get_flattened_tensors
+from torch.utils._python_dispatch import (
+    get_flattened_tensors,
+    is_traceable_wrapper_subclass,
+)
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import (
