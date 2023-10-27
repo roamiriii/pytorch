@@ -3,6 +3,7 @@ import functools
 import pickle
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 
 import torch
@@ -28,6 +29,14 @@ HAS_TRITON = has_triton()
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+
+try:
+    from torchvision.models import resnet18
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "requires torchvision")
 
 
 class MyModel(torch.nn.Module):
@@ -151,6 +160,46 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(model(a), compiled_model(a))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @skipIfNoTorchVision
+    @config.patch({"fx_graph_cache": True})
+    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("dtype", (torch.float32, torch.float16))
+    def test_cache_resnet_backward(self, device, dtype):
+        """
+        Test backward graphs using resnet18. This model exposes failures
+        to properly handle output strides.
+        """
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(mod, x):
+            mod.zero_grad()
+            mod(x).sum().backward()
+            return [p.grad for p in mod.parameters()]
+
+        compiled_fn = torch.compile(fn)
+
+        mod = resnet18().to(device=device, dtype=dtype)
+        inp = torch.randn(1, 3, 224, 224, device=device, dtype=dtype)
+
+        # The first call should see all cache misses.
+        print("1111111111111111111", file=sys.stderr)
+        counters.clear()
+        grads1 = compiled_fn(mod, inp)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A second call should see all cache hits.
+        print("2222222222222222222", file=sys.stderr)
+        counters.clear()
+        torch._dynamo.reset()
+        grads2 = compiled_fn(mod, inp)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # And the results should be the same.
+        self.assertEqual(grads1, grads2)
 
 
 class TestFxGraphCacheHashing(TestCase):
