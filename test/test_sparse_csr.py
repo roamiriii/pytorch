@@ -3794,6 +3794,80 @@ class TestSparseCompressedTritonKernels(TestCase):
 
                     self.assertEqual(result, expected)
 
+    def test_TensorAsKey(self, device):
+        from torch.sparse._triton_ops import TensorAsKey
+        assertEqualOptions = dict(exact_dtype=True, exact_device=True, exact_layout=True)
+
+        t = torch.tensor([1, 2, 3, 4], dtype=torch.int64, device=device)
+        key = TensorAsKey(t)
+        self.assertTrue(key == TensorAsKey(t))
+        self.assertEqual(key.obj, t, **assertEqualOptions)
+
+        t2 = t[:]
+        key2 = TensorAsKey(t2)
+        self.assertTrue(key == key2)
+        self.assertEqual(key2.obj, t, **assertEqualOptions)
+        del t2
+        # t2 can be restored from the key object:
+        self.assertEqual(key2.obj, t, **assertEqualOptions)
+
+        # key with different storage offset and shape:
+        self.assertFalse(key == TensorAsKey(t[1:]))
+
+        # key with different strides:
+        self.assertFalse(key == TensorAsKey(t[::2]))
+
+        # when object dies, make sure that key represents a dead
+        # object as well:
+        del t
+        self.assertTrue(key.obj is None)
+
+        # Storing a tensor as a dict key:
+        d = {}
+        t3 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key3 = TensorAsKey(t3)
+        d[key3] = 123
+        self.assertTrue(d.get(key3) == 123)
+        self.assertTrue(d.get(TensorAsKey(t3[:])) == 123)
+        self.assertTrue(d.get(TensorAsKey(t3.clone())) is None)
+
+        d[TensorAsKey(t3[:])] = 567
+        self.assertTrue(d.get(key3) == 567)
+
+        # when object dies, the corresponding key is still valid:
+        del t3
+        self.assertTrue(key3.obj is None)
+        self.assertTrue(d.get(key3) == 567)
+
+        # Storing a tensor as a dict key and value:
+        d = {}
+        t4 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key4 = TensorAsKey(t4)
+        d[key4] = (t4, 123)
+        self.assertEqual(d.get(key4), (t4, 123), **assertEqualOptions)
+        # when object is deleted, the key represents an alive object
+        # because the object is referenced by the dict item value:
+        del t4
+        self.assertTrue(key4.obj is not None)
+        # This also means that the life time of the tensor is same as
+        # the life time of the corresponding dict item:
+        del d[key4]
+        self.assertTrue(key4.obj is None)
+
+        # Storing a tensor as a dict key and value wrapped with TensorAsKey:
+        d = {}
+        t5 = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+        key5 = TensorAsKey(t5)
+        d[key5] = (key5, 567)
+        self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
+        self.assertTrue(key5.obj is not None)
+        # when object is deleted, it will be dead as the wrapped value
+        # hold the tensor instance as a weakref:
+        del t5
+        self.assertTrue(key5.obj is None)
+        # but key is still valid:
+        self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
