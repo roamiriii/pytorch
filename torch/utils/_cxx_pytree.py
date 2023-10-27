@@ -26,9 +26,12 @@ from typing import (
     Union,
 )
 
+import torch
 from ._pytree import TreeSpec as PyTreeSpec
 
 try:
+    if torch._running_with_deploy() and torch.compiled_with_cxx11_abi():
+        raise ModuleNotFoundError
     import optree
 except ModuleNotFoundError:
     optree = None  # type: ignore[assignment]
@@ -90,7 +93,11 @@ def register_pytree_node(
     cls: Type[Any],
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
+    *,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
     namespace: str = "torch",
+    _register_python_pytree_node: bool = True,
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
 
@@ -199,13 +206,17 @@ def register_pytree_node(
             )
         )
     """
-    from ._pytree import _register_pytree_node
+    if _register_python_pytree_node:
+        from ._pytree import _register_pytree_node
 
-    _register_pytree_node(
-        cls,
-        flatten_func,
-        unflatten_func,
-    )
+        _register_pytree_node(
+            cls,
+            flatten_func,
+            unflatten_func,
+            to_dumpable_context=to_dumpable_context,
+            from_dumpable_context=from_dumpable_context,
+            _register_cxx_pytree_node=False,
+        )
 
     if optree is not None and not optree.is_structseq_class(cls):
         optree.register_pytree_node(
