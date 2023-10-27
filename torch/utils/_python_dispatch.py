@@ -135,15 +135,16 @@ class BaseTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         return func(*args, **kwargs)
 
+# Cant properly type because of circular reference
 @dataclass
 class SubclassDynamicDims:
-    outer: Tuple["DimDynamic"]
-    inner: List[List[Tuple["DimDynamic"]]]
+    outer: List[Any]
+    inner: List[List[Tuple[Any]]]
 
 @dataclass
 class SubclassConstraintDims:
-    outer: Tuple["Constraint"]
-    inner: List[List[Tuple["Constraint"]]]
+    outer: List[Any]
+    inner: List[List[Tuple[Any]]]
 
 def is_traceable_wrapper_subclass(t):
     """

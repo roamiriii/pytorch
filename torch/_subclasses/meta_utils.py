@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional
+from typing import ContextManager, List, Optional, Union
 
 import torch
 from torch._C._functorch import (
@@ -17,6 +17,8 @@ from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
+    SubclassConstraintDims,
+    SubclassDynamicDims,
     transform_subclass,
 )
 from torch.utils.weak import WeakIdRef
@@ -180,8 +182,10 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: Union[Optional[DimList[DimDynamic]], SubclassDynamicDims] = None,
+        constraint_dims: Union[
+            Optional[DimList[DimConstraint]], SubclassConstraintDims
+        ] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -411,18 +415,31 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
-                        #TODO: This sucks.. so outer and inner can have different shapes
+                        # TODO: This sucks.. so outer and inner can have different shapes
                         # the test only has 1 inner tensor with num_inner_dims == num_outer_dims
                         # we can arbitrarily pick the first dynamic_dim in the list returned by
                         # get_flattened_tensors() but this feels all wrong
                         # I think we need to make some contract between at least the # of dims between 1 of the
-                        if is_traceable_wrapper_subclass(t) and dynamic_dims is not None:
+                        if is_traceable_wrapper_subclass(t) and isinstance(
+                            dynamic_dims, SubclassDynamicDims
+                        ):
+                            assert isinstance(
+                                constraint_dims, SubclassConstraintDims
+                            ), "constraint_dims must be a SubclassConstraintDims"
                             # We will add the outer dynamic_dims here, later on the inner will be checked
                             temp_dynamic_dims = dynamic_dims.outer
                             temp_constraint_dims = constraint_dims.outer
                         else:
-                            temp_dynamic_dims = dynamic_dims
-                            temp_constraint_dims = constraint_dims
+                            # Appease MYPY
+                            if isinstance(dynamic_dims, list):
+                                temp_dynamic_dims = dynamic_dims
+                            else:
+                                temp_dynamic_dims = []
+
+                            if isinstance(constraint_dims, list):
+                                temp_constraint_dims = constraint_dims
+                            else:
+                                temp_constraint_dims = []
                         (
                             sizes,
                             strides,
@@ -504,6 +521,16 @@ class MetaConverter:
                                 transformed_tensors_dict, ctx
                             )
                         else:
+                            inner_dims = (
+                                dynamic_dims.inner
+                                if isinstance(dynamic_dims, SubclassDynamicDims)
+                                else None
+                            )
+                            inner_constraint_dims = (
+                                constraint_dims.inner
+                                if isinstance(constraint_dims, SubclassConstraintDims)
+                                else None
+                            )
                             r = transform_subclass(
                                 t,
                                 lambda attr, inner_t, tensor_dyn_dim, tensor_constraint_dim: callback(
@@ -514,8 +541,8 @@ class MetaConverter:
                                         tensor_constraint_dim,
                                     )
                                 ),
-                                dynamic_dims.inner if dynamic_dims is not None else None,
-                                constraint_dims.inner if constraint_dims is not None else None,
+                                inner_dims,
+                                inner_constraint_dims,
                             )
                     else:
                         r = callback(

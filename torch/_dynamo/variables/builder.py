@@ -34,8 +34,8 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import (
     get_flattened_tensors,
     is_traceable_wrapper_subclass,
+    SubclassConstraintDims,
     SubclassDynamicDims,
-    SubclassConstraintDims
 )
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -1623,15 +1623,19 @@ def _automatic_dynamic(e, tx, name, static_shapes, dont_recurse: bool = False):
         # traceable_constraint_dims = SubclassConstraintDims()
         inner_dynamic_dims = []
         inner_constraint_dims = []
-        outer_dynamic_dims, outer_constraint_dims = _automatic_dynamic(e, tx, name, static_shapes, dont_recurse=True)
+        outer_dynamic_dims, outer_constraint_dims = _automatic_dynamic(
+            e, tx, name, static_shapes, dont_recurse=True
+        )
         for tensor in get_flattened_tensors(e):
             tensor_dynamic_dims, tensor_constraint_dims = _automatic_dynamic(
                 tensor, tx, name, static_shapes
             )
             inner_dynamic_dims.append(tensor_dynamic_dims)
             inner_constraint_dims.append(tensor_constraint_dims)
-        return (SubclassDynamicDims(outer_dynamic_dims, inner_dynamic_dims),
-                SubclassConstraintDims(outer_constraint_dims, inner_constraint_dims))
+        return (
+            SubclassDynamicDims(outer_dynamic_dims, inner_dynamic_dims),
+            SubclassConstraintDims(outer_constraint_dims, inner_constraint_dims),
+        )
 
     if static_shapes:
         return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
