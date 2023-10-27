@@ -1,5 +1,5 @@
 import contextlib
-from typing import Optional, Union, List, Set, Dict, Any
+from typing import Optional, Union, List, Set, Dict, Any, Tuple
 
 import warnings
 from dataclasses import dataclass
@@ -134,6 +134,16 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+@dataclass
+class SubclassDynamicDims:
+    outer: Tuple["DimDynamic"]
+    inner: List[List[Tuple["DimDynamic"]]]
+
+@dataclass
+class SubclassConstraintDims:
+    outer: Tuple["Constraint"]
+    inner: List[List[Tuple["Constraint"]]]
 
 def is_traceable_wrapper_subclass(t):
     """

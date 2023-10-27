@@ -411,12 +411,24 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
+                        #TODO: This sucks.. so outer and inner can have different shapes
+                        # the test only has 1 inner tensor with num_inner_dims == num_outer_dims
+                        # we can arbitrarily pick the first dynamic_dim in the list returned by
+                        # get_flattened_tensors() but this feels all wrong
+                        # I think we need to make some contract between at least the # of dims between 1 of the
+                        if is_traceable_wrapper_subclass(t) and dynamic_dims is not None:
+                            # We will add the outer dynamic_dims here, later on the inner will be checked
+                            temp_dynamic_dims = dynamic_dims.outer
+                            temp_constraint_dims = constraint_dims.outer
+                        else:
+                            temp_dynamic_dims = dynamic_dims
+                            temp_constraint_dims = constraint_dims
                         (
                             sizes,
                             strides,
                             storage_offset,
                         ) = sym_sizes_strides_storage_offset(
-                            t, source, dynamic_dims, constraint_dims
+                            t, source, temp_dynamic_dims, temp_constraint_dims
                         )
 
                     def empty_create(
@@ -502,8 +514,8 @@ class MetaConverter:
                                         tensor_constraint_dim,
                                     )
                                 ),
-                                dynamic_dims,
-                                constraint_dims,
+                                dynamic_dims.inner if dynamic_dims is not None else None,
+                                constraint_dims.inner if constraint_dims is not None else None,
                             )
                     else:
                         r = callback(
