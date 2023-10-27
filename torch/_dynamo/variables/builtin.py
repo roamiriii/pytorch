@@ -886,7 +886,9 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 1
             arg = args[0]
             if isinstance(arg, dict):
-                return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
+                return ConstDictVariable.create(
+                    arg, user_cls, mutable_local=MutableLocal()
+                )
             elif isinstance(arg, variables.ConstDictVariable):
                 return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
             elif isinstance(
@@ -897,15 +899,17 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = user_cls()
+                items = {}
                 for x in arg.unpack_var_sequence(tx):
                     k, v = x.unpack_var_sequence(tx)
-                    k = ConstDictVariable.get_key(k)
                     items.update({k: v})
-                return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
+                return ConstDictVariable.create(
+                    items, user_cls, mutable_local=MutableLocal()
+                )
         elif not args and kwargs:
-            return variables.ConstDictVariable(
-                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
+            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
+            return variables.ConstDictVariable.create(
+                items, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
 
